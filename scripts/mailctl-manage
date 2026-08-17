@@ -1,0 +1,141 @@
+#!/bin/bash
+# mailctl management wrapper with common operations
+
+set -euo pipefail
+
+CONFIG_FILE="/etc/mailctl/config.yaml"
+MAILCTL="mailctl --config $CONFIG_FILE"
+
+usage() {
+    cat << 'EOF'
+mailctl-manage - Mail server management wrapper
+
+USAGE:
+    mailctl-manage <command> [args...]
+
+COMMANDS:
+    setup-domain <domain>       Add domain, generate DKIM, deploy config
+    add-user <email> [quota]    Add mailbox user
+    add-alias <alias> <targets> Add email alias
+    rotate-dkim <domain>        Rotate DKIM keys
+    deploy                      Generate, validate, deploy config
+    health                      Run full health check
+    backup [name]               Create backup
+    restore <file>              Restore from backup
+    logs                        Show recent logs
+    status                      Show service status
+    reload [service]            Reload service (default: all)
+
+EXAMPLES:
+    mailctl-manage setup-domain example.com
+    mailctl-manage add-user alice@example.com 2G
+    mailctl-manage add-alias support@example.com alice@example.com
+    mailctl-manage deploy
+    mailctl-manage health
+EOF
+}
+
+cmd_setup_domain() {
+    local domain="$1"
+    local selector="${2:-mail}"
+    local key_size="${3:-2048}"
+    
+    log "Setting up domain: $domain"
+    $MAILCTL domain add "$domain" --dkim-selector "$selector" --dkim-key-size "$key_size"
+    $MAILCTL dkim generate "$domain" --selector "$selector"
+    $MAILCTL config deploy
+    log "Domain $domain configured successfully"
+}
+
+cmd_add_user() {
+    local email="$1"
+    local quota="${2:-1G}"
+    
+    log "Adding user: $email with quota $quota"
+    $MAILCTL user add "$email" --quota "$quota"
+    $MAILCTL config deploy
+}
+
+cmd_add_alias() {
+    local alias="$1"
+    local targets="$2"
+    
+    log "Adding alias: $alias -> $targets"
+    $MAILCTL alias add "$alias" "$targets"
+    $MAILCTL config deploy
+}
+
+cmd_rotate_dkim() {
+    local domain="$1"
+    local selector="${2:-mail}"
+    
+    log "Rotating DKIM key for $domain:$selector"
+    $MAILCTL dkim rotate "$domain" --selector "$selector"
+    $MAILCTL config deploy
+    log "DKIM rotated. Update DNS with new record:"
+    $MAILCTL dkim show "$domain" --selector "$selector" --dns-format
+}
+
+cmd_deploy() {
+    log "Deploying configuration..."
+    $MAILCTL config generate --output-dir /tmp/mailctl-config
+    $MAILCTL config validate --config-dir /tmp/mailctl-config
+    $MAILCTL config deploy --config-dir /tmp/mailctl-config
+    $MAILCTL service reload all
+    log "Deployment complete"
+}
+
+cmd_health() {
+    $MAILCTL doctor run
+}
+
+cmd_backup() {
+    local name="${1:-backup-$(date +%Y%m%d-%H%M%S)}"
+    $MAILCTL backup create --output "/var/backups/mailctl/${name}.tar.gz"
+}
+
+cmd_restore() {
+    local file="$1"
+    $MAILCTL backup restore "$file" --force
+}
+
+cmd_logs() {
+    journalctl -u mailctl-init -u postfix -u dovecot -u rspamd -n 100 --no-pager
+}
+
+cmd_status() {
+    $MAILCTL service status
+}
+
+cmd_reload() {
+    local service="${1:-all}"
+    $MAILCTL service reload "$service"
+}
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+main() {
+    if [[ $# -eq 0 ]]; then
+        usage
+        exit 1
+    fi
+
+    case "$1" in
+        setup-domain) cmd_setup_domain "${@:2}" ;;
+        add-user) cmd_add_user "${@:2}" ;;
+        add-alias) cmd_add_alias "${@:2}" ;;
+        rotate-dkim) cmd_rotate_dkim "${@:2}" ;;
+        deploy) cmd_deploy ;;
+        health) cmd_health ;;
+        backup) cmd_backup "${@:2}" ;;
+        restore) cmd_restore "${@:2}" ;;
+        logs) cmd_logs ;;
+        status) cmd_status ;;
+        reload) cmd_reload "${@:2}" ;;
+        *) usage; exit 1 ;;
+    esac
+}
+
+main "$@"

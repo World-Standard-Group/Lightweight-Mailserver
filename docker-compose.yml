@@ -1,0 +1,115 @@
+services:
+  postgres:
+    image: postgres:18-trixie
+    container_name: mailctl-postgres
+    environment:
+      POSTGRES_DB: mailctl
+      POSTGRES_USER: mailctl
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./init-db:/docker-entrypoint-initdb.d
+    networks:
+      - mailnet
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mailctl -d mailctl"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:trixie
+    container_name: mailctl-redis
+    volumes:
+      - redis_data:/data
+    networks:
+      - mailnet
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rspamd:
+    image: rspamd/rspamd:latest
+    container_name: mailctl-rspamd
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./config/rspamd:/etc/rspamd/local.d
+      - ./dkim:/etc/rspamd/dkim
+      - rspamd_data:/var/lib/rspamd
+    ports:
+      - "11332:11332"
+      - "11333:11333"
+      - "11334:11334"
+    networks:
+      - mailnet
+    environment:
+      - REDIS_HOST=redis
+
+  postfix:
+    image: catatnight/postfix:latest
+    container_name: mailctl-postfix
+    depends_on:
+      - rspamd
+      - dovecot
+    volumes:
+      - ./config/postfix:/etc/postfix
+      - mail_data:/var/mail
+      - ./dkim:/etc/rspamd/dkim
+    ports:
+      - "25:25"
+      - "587:587"
+      - "465:465"
+    environment:
+      - MAIL_DOMAIN=${MAIL_DOMAIN:-example.com}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+    networks:
+      - mailnet
+
+  dovecot:
+    image: dovecot/dovecot:latest
+    container_name: mailctl-dovecot
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./config/dovecot:/etc/dovecot
+      - mail_data:/var/mail
+    ports:
+      - "143:143"
+      - "993:993"
+      - "4190:4190"
+    networks:
+      - mailnet
+
+  mailctl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mailctl
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./config:/etc/mailctl
+      - mail_data:/var/mail
+      - ./dkim:/etc/rspamd/dkim
+      - ./backups:/var/backups/mailctl
+    networks:
+      - mailnet
+    entrypoint: ["sleep", "infinity"]
+
+volumes:
+  postgres_data:
+  redis_data:
+  rspamd_data:
+  mail_data:
+  backups:
+
+networks:
+  mailnet:
+    driver: bridge

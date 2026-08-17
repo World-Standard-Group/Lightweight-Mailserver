@@ -1,0 +1,27 @@
+#!/bin/bash
+# Cron job for mailctl automated backup and maintenance
+# Install with: sudo cp mailctl-cron /etc/cron.d/mailctl
+
+# Mailctl configuration
+MAILCTL_CONFIG="/etc/mailctl/config.yaml"
+MAILCTL="mailctl --config $MAILCTL_CONFIG"
+BACKUP_DIR="/var/backups/mailctl"
+
+# Daily backup at 3:00 AM
+0 3 * * * root $MAILCTL backup create --output "$BACKUP_DIR/backup-$(date +\%Y\%m\%d-\%H\%M\%S).tar.gz" >> /var/log/mailctl-backup.log 2>&1
+
+# Weekly full backup with rotation on Sunday 4:00 AM
+0 4 * * 0 root find "$BACKUP_DIR" -name "*.tar.gz" -mtime +30 -delete >> /var/log/mailctl-backup.log 2>&1
+
+# Health check every 15 minutes
+*/15 * * * * root $MAILCTL health liveness >> /var/log/mailctl-health.log 2>&1
+
+# Daily health check with full report at 6:00 AM
+0 6 * * * root $MAILCTL doctor run >> /var/log/mailctl-doctor.log 2>&1
+
+# DKIM key rotation reminder (annually on Jan 1st at 2:00 AM)
+# This just logs a reminder - manual rotation required
+0 2 1 1 * root echo "DKIM key rotation due for $(date +\%Y). Run: mailctl dkim rotate example.com" >> /var/log/mailctl-dkim.log 2>&1
+
+# Log rotation - keep 30 days of mailctl logs
+0 5 * * * root find /var/log/mailctl* -name "*.log" -mtime +30 -delete 2>/dev/null || true

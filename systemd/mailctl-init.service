@@ -1,0 +1,14 @@
+[Unit]
+Description=mailctl Configuration Deployment
+After=network.target postgresql.service
+Requires=postgresql.service
+Before=postfix.service dovecot.service rspamd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/mailctl-config-deploy.sh
+RemainAfterExit=yes
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target
