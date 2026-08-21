@@ -114,14 +114,14 @@ version: '3.8'
 services:
   # PostgreSQL (external in production, but included for dev)
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-trixie
     container_name: mailctl-postgres
     environment:
-      POSTGRES_DB: mailctl
-      POSTGRES_USER: mailctl
+      POSTGRES_DB: ${POSTGRES_DATABASE:-changeme}
+      POSTGRES_USER: ${POSTGRES_USERNAME:-changeme}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       - ./init-db:/docker-entrypoint-initdb.d
     networks:
       - mailnet
@@ -133,7 +133,7 @@ services:
 
   # Redis for Rspamd
   redis:
-    image: redis:7-alpine
+    image: redis:trixie
     container_name: mailctl-redis
     volumes:
       - redis_data:/data
@@ -296,7 +296,7 @@ apt-get update && apt-get install -y \
     dovecot-core dovecot-imapd dovecot-lmtpd dovecot-pgsql \
     rspamd \
     redis-server \
-    postgresql-client-16 \
+    postgresql-client-18 \
     certbot \
     rsync \
     tar \
