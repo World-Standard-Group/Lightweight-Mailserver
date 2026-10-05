@@ -14,6 +14,12 @@ import picocli.CommandLine;
         DomainCommand.ListCmd.class
     }
 )
+    /**
+     * Domain management: {@code domain add|remove|list}.
+     *  *
+     *  * <p>A domain must exist here before users or DKIM keys can be created for it.
+     *  * Removing a domain cascades to its users, aliases and DKIM keys.</p>
+     */
 public class DomainCommand implements Runnable {
     @Override
     public void run() {
@@ -31,7 +37,7 @@ public class DomainCommand implements Runnable {
         @CommandLine.Option(names = {"--dkim-key-size"}, description = "DKIM key size", defaultValue = "2048")
         int dkimKeySize;
 
-        @CommandLine.Option(names = {"--dkim-algorithm"}, description = "DKIM algorithm (rsa2048, rsa4096, ed25519)", defaultValue = "rsa2048")
+        @CommandLine.Option(names = {"--dkim-algorithm"}, description = "DKIM algorithm: rsa2048 or rsa4096", defaultValue = "rsa2048")
         String dkimAlgorithm;
 
         private final DomainService domainService;

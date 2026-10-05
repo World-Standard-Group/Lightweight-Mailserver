@@ -17,6 +17,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+    /**
+     * Runs the diagnostic checks behind {@code health check} and {@code doctor run}.
+     *  *
+     *  * <p><b>Most checks are placeholders.</b> The DNS (MX, SPF, DKIM, DMARC, PTR),
+     *  * Mailbox Permissions, Firewall, Open Relay, Submission Auth and IMAP TLS checks
+     *  * return {@code passed = true} without performing any verification, and the queue
+     *  * count is fabricated. Hostname, FQDN, the three service config checks,
+     *  * PostgreSQL reachability and Disk Space do real work.</p>
+     *  *
+     *  * <p>Service checks call {@code systemctl is-active}, so they fail inside the
+     *  * container. Treat a {@code HEALTHY} report as "nothing errored" rather than
+     *  * "everything verified".</p>
+     */
 public class HealthChecker {
     private static final Logger log = LoggerFactory.getLogger(HealthChecker.class);
 

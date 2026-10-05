@@ -7,6 +7,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+    /**
+     * Business rules for aliases, including owner-domain validation.
+     */
 public class RoutingService {
     private final AliasRepository aliasRepository;
     private final DomainRepository domainRepository;

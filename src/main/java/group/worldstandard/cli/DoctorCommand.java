@@ -16,6 +16,21 @@ import picocli.CommandLine;
         DoctorCommand.Security.class
     }
 )
+    /**
+     * Diagnostics: {@code doctor run|dns|tls|services|storage|security}.
+     *  *
+     *  * <p><b>Read the caveat before trusting a result.</b> {@code doctor run} executes
+     *  * 22 checks, but the DNS (MX, SPF, DKIM, DMARC, PTR), Mailbox Permissions,
+     *  * Firewall, Open Relay, Submission Auth and IMAP TLS checks are placeholders that
+     *  * return {@code passed = true} without performing any lookup. The four named
+     *  * subcommands are placeholders outright. A {@code HEALTHY} result means "nothing
+     *  * errored", not "everything verified".</p>
+     *  *
+     *  * <p>Service checks invoke {@code systemctl}, which does not exist inside the
+     *  * container, so they report failures under Docker.</p>
+     *  *
+     *  * @see group.worldstandard.infrastructure.HealthChecker
+     */
 public class DoctorCommand implements Runnable {
     @Override
     public void run() {

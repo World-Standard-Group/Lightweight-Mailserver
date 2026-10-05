@@ -13,6 +13,16 @@ import picocli.CommandLine;
         DkimCommand.Rotate.class
     }
 )
+    /**
+     * DKIM key management: {@code dkim generate|show|rotate}.
+     *  *
+     *  * <p>Keys are stored in PostgreSQL and the corresponding DNS record is printed
+     *  * for publication at {@code <selector>._domainkey.<domain>}. Supported
+     *  * algorithms are {@code rsa2048} and {@code rsa4096}; keys
+     *  * expire after one year.</p>
+     *  *
+     *  * @see group.worldstandard.security.DkimKeyManager
+     */
 public class DkimCommand implements Runnable {
     @Override
     public void run() {
@@ -27,10 +37,10 @@ public class DkimCommand implements Runnable {
         @CommandLine.Option(names = {"--selector"}, description = "DKIM selector", defaultValue = "mail")
         String selector;
 
-        @CommandLine.Option(names = {"--key-size"}, description = "Key size in bits", defaultValue = "2048")
+        @CommandLine.Option(names = {"--key-size"}, description = "RSA key size in bits (1024, 2048, 3072 or 4096)", defaultValue = "2048")
         int keySize;
 
-        @CommandLine.Option(names = {"--algorithm"}, description = "Algorithm (rsa2048, rsa4096, ed25519)", defaultValue = "rsa2048")
+        @CommandLine.Option(names = {"--algorithm"}, description = "Algorithm: rsa2048 or rsa4096", defaultValue = "rsa2048")
         String algorithm;
 
         private final DkimKeyManager dkimKeyManager;
@@ -57,7 +67,7 @@ public class DkimCommand implements Runnable {
                 System.out.println("  Domain: " + domain);
                 System.out.println("  Selector: " + key.selector());
                 System.out.println("  Algorithm: " + key.algorithm());
-                System.out.println("  Key Size: " + key.keySize());
+                System.out.println("  Key Size: " + key.keySize() + " bits");
                 System.out.println("  Expires: " + key.expiresAt());
                 System.out.println();
                 System.out.println("DNS Record (add to your DNS):");

@@ -8,6 +8,13 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.UUID;
 
+    /**
+     * A DKIM key pair plus the DNS record that publishes its public half.
+     *  *
+     *  * <p>The private key is stored in the database so the control plane can render
+     *  * Rspamd's signing maps without external key storage. Treat this table as a
+     *  * secret: a leak lets anyone sign mail as the domain.</p>
+     */
 public record DkimKey(
     @JsonProperty("id") UUID id,
     @JsonProperty("domainId") UUID domainId,
@@ -59,14 +66,25 @@ public record DkimKey(
         return sb.toString();
     }
 
+    /**
+     * Builds the DKIM DNS TXT record.
+     *
+     * <p>Only RSA is supported. For RSA, {@code p=} is the base64 of the
+     * DER-encoded X.509 SubjectPublicKeyInfo, which is exactly what the PEM body
+     * holds.</p>
+     *
+     * <p>Ed25519 (RFC 8463) is deliberately not implemented: it would need the
+     * raw 32-byte key in {@code p=} rather than the SPKI, and a number of major
+     * receiving servers still fail to verify Ed25519 DKIM signatures. Use
+     * {@code rsa2048} or {@code rsa4096}.</p>
+     */
     private static String generateDnsRecord(String selector, String publicKeyPem, String algorithm) {
-        // Extract the base64 public key (without headers)
+        // Strip the PEM armour to recover the base64 SPKI payload.
         String key = publicKeyPem
             .replace("-----BEGIN PUBLIC KEY-----", "")
             .replace("-----END PUBLIC KEY-----", "")
             .replaceAll("\\s", "");
-        
-        String k = "rsa".equalsIgnoreCase(algorithm) ? "rsa" : "ed25519";
-        return String.format("v=DKIM1; k=%s; p=%s", k, key);
+
+        return String.format("v=DKIM1; k=rsa; p=%s", key);
     }
 }

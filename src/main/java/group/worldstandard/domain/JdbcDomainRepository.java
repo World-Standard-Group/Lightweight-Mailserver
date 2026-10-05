@@ -8,6 +8,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+    /**
+     * PostgreSQL persistence for {@link Domain} using prepared statements.
+     *  *
+     *  * <p>Reads columns by name, so the names must match
+     *  * {@code db/migration/V1__init.sql} exactly.</p>
+     */
 public class JdbcDomainRepository implements DomainRepository {
     private final HikariDataSource dataSource;
 

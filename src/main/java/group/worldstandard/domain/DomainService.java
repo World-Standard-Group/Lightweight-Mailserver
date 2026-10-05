@@ -4,6 +4,14 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+    /**
+     * Business rules for domains.
+     *  *
+     *  * <p>Validates domain names before they reach the database: a label syntax
+     *  * check, a 253-character total limit, a 63-character per-label limit, and
+     *  * rejection of leading or trailing hyphens. This is the only place those rules
+     *  * exist, so keep new write paths going through it.</p>
+     */
 public class DomainService {
     private final DomainRepository domainRepository;
 
@@ -20,6 +28,9 @@ public class DomainService {
         
         Domain domain = Domain.create(name);
         if (dkimSelector != null) {
+            // Refuse a non-RSA policy up front so the stored domain policy can
+           // never disagree with what dkim generate will actually produce.
+            group.worldstandard.security.DkimKeyManager.requireRsa(dkimAlgorithm);
             domain = domain.withDkimSettings(dkimSelector, dkimKeySize, dkimAlgorithm);
         }
         

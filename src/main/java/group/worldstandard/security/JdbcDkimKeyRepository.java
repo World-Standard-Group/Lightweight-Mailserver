@@ -8,6 +8,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+    /**
+     * PostgreSQL persistence for {@link DkimKey} using prepared statements.
+     */
 public class JdbcDkimKeyRepository implements DkimKeyRepository {
     private final HikariDataSource dataSource;
 

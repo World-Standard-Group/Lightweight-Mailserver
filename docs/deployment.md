@@ -85,204 +85,296 @@
 
 ## Quick Start
 
-### 1. Build the Project
+### 1. Deploy the Stack (Recommended)
 ```bash
-cd /path/to/lightweight-mailserver
-./mvnw package
-# or with system Maven
-mvn package
+git clone <repo> && cd lightweight-mailserver
+cp .env.example .env
+$EDITOR .env          # set MAIL_DOMAIN, MAIL_HOSTNAME, POSTGRES_PASSWORD
+bash scripts/start.sh
 ```
 
-### 2. Verify Build
+### 2. Verify
 ```bash
+docker compose exec mailctl mailctl --help
+docker compose exec mailctl mailctl doctor run
+```
+
+### 3. Add a Domain and a User
+```bash
+docker compose exec mailctl mailctl domain add example.com
+docker compose exec mailctl mailctl dkim generate example.com
+docker compose exec -T mailctl mailctl user add alice@example.com --password 'secret'
+bash scripts/apply-config.sh
+```
+
+### 4. Build Locally (no Docker)
+```bash
+# There is no Maven wrapper in this repo; use a system Maven.
+mvn package
 java -jar target/lw-mailserver-0.0.1-indev.jar --help
 ```
 
-### 3. Run with Docker (Recommended)
-```bash
-docker-compose up -d
-```
+See [Docker Deployment](#docker-deployment-containerised) for the full guide.
 
 ---
 
-## Docker Deployment
+## Docker Deployment (containerised)
 
-### docker-compose.yml
-```yaml
-version: '3.8'
+Every component runs in Docker: PostgreSQL, Redis, Rspamd, Postfix, Dovecot
+and mailctl. mailctl is a CLI, not a daemon, so its container idles and you
+drive it with `docker compose exec`.
 
-services:
-  # PostgreSQL (external in production, but included for dev)
-  postgres:
-    image: postgres:18-trixie
-    container_name: mailctl-postgres
-    environment:
-      POSTGRES_DB: ${POSTGRES_DATABASE:-changeme}
-      POSTGRES_USER: ${POSTGRES_USERNAME:-changeme}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
-    volumes:
-      - postgres_data:/var/lib/postgresql
-      - ./init-db:/docker-entrypoint-initdb.d
-    networks:
-      - mailnet
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mailctl -d mailctl"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+### One-command deploy
 
-  # Redis for Rspamd
-  redis:
-    image: redis:trixie
-    container_name: mailctl-redis
-    volumes:
-      - redis_data:/data
-    networks:
-      - mailnet
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Rspamd
-  rspamd:
-    image: rspamd/rspamd:latest
-    container_name: mailctl-rspamd
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./config/rspamd:/etc/rspamd/local.d
-      - ./dkim:/etc/rspamd/dkim
-      - rspamd_data:/var/lib/rspamd
-    ports:
-      - "11332:11332"  # milter
-      - "11333:11333"  # normal
-      - "11334:11334"  # controller
-    networks:
-      - mailnet
-    environment:
-      - REDIS_HOST=redis
-
-  # Postfix
-  postfix:
-    image: catatnight/postfix:latest
-    container_name: mailctl-postfix
-    depends_on:
-      - rspamd
-      - dovecot
-    volumes:
-      - ./config/postfix:/etc/postfix
-      - mail_data:/var/mail
-      - ./dkim:/etc/rspamd/dkim
-    ports:
-      - "25:25"
-      - "587:587"
-      - "465:465"
-    environment:
-      - MAIL_DOMAIN=${MAIL_DOMAIN:-example.com}
-      - SMTP_USER=${SMTP_USER}
-      - SMTP_PASSWORD=${SMTP_PASSWORD}
-    networks:
-      - mailnet
-
-  # Dovecot
-  dovecot:
-    image: dovecot/dovecot:latest
-    container_name: mailctl-dovecot
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./config/dovecot:/etc/dovecot
-      - mail_data:/var/mail
-    ports:
-      - "143:143"
-      - "993:993"
-      - "4190:4190"  # sieve
-    networks:
-      - mailnet
-
-  # mailctl CLI (control plane)
-  mailctl:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: mailctl
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./config:/etc/mailctl
-      - mail_data:/var/mail
-      - ./dkim:/etc/rspamd/dkim
-      - ./backups:/var/backups/mailctl
-    networks:
-      - mailnet
-    entrypoint: ["sleep", "infinity"]
-
-volumes:
-  postgres_data:
-  redis_data:
-  rspamd_data:
-  mail_data:
-  backups:
-
-networks:
-  mailnet:
-    driver: bridge
-```
-
-### Dockerfile
-```dockerfile
-FROM eclipse-temurin:25-jdk-alpine AS builder
-
-WORKDIR /app
-COPY pom.xml .
-COPY src ./src
-COPY .mvn .mvn
-COPY mvnw .
-
-RUN ./mvnw package -DskipTests -q
-
-FROM eclipse-temurin:25-jre-alpine
-
-RUN apk add --no-cache \
-    postgresql-client \
-    bash \
-    coreutils \
-    findutils
-
-WORKDIR /app
-
-COPY --from=builder /app/target/lw-mailserver-0.0.1-indev.jar mailctl.jar
-COPY --from=builder /app/src/main/resources/db/migration /app/db/migration
-
-ENV MAILCTL_CONFIG=/etc/mailctl/config.yaml
-ENV JAVA_OPTS="-Xms256m -Xmx512m"
-
-ENTRYPOINT ["java", "-jar", "mailctl.jar"]
-```
-
-### Initialize Docker Environment
 ```bash
-# 1. Create directory structure
-mkdir -p config/postfix config/dovecot config/rspamd dkim backups init-db
+# first time
+bash scripts/start.sh
 
-# 2. Generate initial config
-docker-compose run --rm mailctl mailctl config generate --output-dir /etc/mailctl
-
-# 3. Generate DKIM keys for your domain
-docker-compose run --rm mailctl mailctl domain add example.com
-docker-compose run --rm mailctl mailctl dkim generate example.com
-
-# 4. Deploy configs
-docker-compose run --rm mailctl mailctl config deploy --config-dir /etc/mailctl
-
-# 5. Start all services
-docker-compose up -d
+# after a git pull
+bash scripts/update.sh
 ```
+
+`start.sh` creates `.env` if missing, creates the bind-mount directories,
+pulls images, builds mailctl, starts the stack, waits for PostgreSQL to become
+healthy and verifies the CLI responds.
+
+`update.sh` pulls the branch, rebuilds the mailctl image and restarts just that
+container. Migrations re-apply automatically on start. Data volumes are
+untouched, so mail state survives every update.
+
+### Running commands
+
+```bash
+docker compose exec mailctl mailctl --help
+docker compose exec mailctl mailctl domain add example.com
+docker compose exec mailctl mailctl dkim generate example.com
+docker compose exec mailctl mailctl user add alice@example.com
+docker compose exec mailctl mailctl alias add support@example.com alice@example.com
+docker compose exec mailctl mailctl doctor run
+```
+
+Add `--` handling for prompts: `user add` and `user passwd` read the password
+from stdin when `--password` is omitted, so pass it non-interactively in
+automation:
+
+```bash
+docker compose exec -T mailctl mailctl user add alice@example.com --password 'secret'
+```
+
+### Applying generated configuration
+
+mailctl renders Postfix, Dovecot and Rspamd configuration from the database into
+`config/generated/`. The mail service containers mount `./config/postfix`,
+`./config/dovecot` and `./config/rspamd`, so a helper copies the rendered files
+into those mount points, runs `postmap`, and restarts the services:
+
+```bash
+bash scripts/apply-config.sh
+```
+
+Re-run this after any change to domains, users, aliases or DKIM keys.
+
+### First-time setup, step by step
+
+```bash
+# 1. Environment
+cp .env.example .env
+$EDITOR .env          # set MAIL_DOMAIN, MAIL_HOSTNAME, POSTGRES_PASSWORD
+
+# 2. TLS material (mailctl and Postfix both read these paths)
+cp /path/to/fullchain.pem config/tls/mailcert.pem
+cp /path/to/privkey.pem   config/tls/mailkey.pem
+
+# 3. Bring everything up
+bash scripts/start.sh
+
+# 4. Add the domain, then read the DKIM DNS record it prints
+docker compose exec mailctl mailctl domain add example.com
+docker compose exec mailctl mailctl dkim generate example.com
+
+# 5. Publish the DKIM TXT record, SPF and DMARC in DNS, then confirm
+docker compose exec mailctl mailctl dkim show example.com --dns-format
+
+# 6. Add a user and push the config to the mail services
+docker compose exec -T mailctl mailctl user add alice@example.com --password 'secret'
+bash scripts/apply-config.sh
+
+# 7. Full diagnostic report
+docker compose exec mailctl mailctl doctor run
+```
+
+### DNS and firewall
+
+Required records for `MAIL_DOMAIN`:
+
+| Type | Name | Value |
+|------|------|-------|
+| A    | `MAIL_HOSTNAME` | the server's public IP |
+| MX   | `MAIL_DOMAIN`   | `MAIL_HOSTNAME` |
+| TXT  | `MAIL_DOMAIN`   | `v=spf1 mx -all` |
+| TXT  | `<selector>._domainkey` | value printed by `dkim generate` |
+| TXT  | `_dmarc`        | `v=DMARC1; p=none; rua=mailto:postmaster@...` |
+
+The reverse DNS (PTR) record for the server IP must resolve back to
+`MAIL_HOSTNAME`. Most receivers reject mail without it.
+
+Open only: 25 (SMTP), 587 (submission), 993 (IMAPS). Port 143 is plaintext IMAP
+and 4190 is sieve; close 143 unless you specifically need it.
+
+### Layout inside the mailctl container
+
+| Path | Purpose | Mounted from host |
+|------|---------|-------------------|
+| `/app/mailctl.jar` | the shaded CLI jar | baked into the image |
+| `/etc/mailctl` | config + `generated/` + `tls/` | `../config` |
+| `/var/mail` | maildirs | `mail_data` volume |
+| `/var/backups/mailctl` | backups | `../backups` |
+
+### Configuration
+
+`config.yaml` is optional. mailctl reads it when present, then applies
+`MAILCTL_*` environment variables on top, so Compose can retarget the container
+without editing a file. Supported variables:
+
+| Variable | Meaning |
+|----------|---------|
+| `MAILCTL_CONFIG` | path to `config.yaml` |
+| `MAILCTL_DB_URL` | JDBC URL |
+| `MAILCTL_DB_USER` / `MAILCTL_DB_PASSWORD` | database credentials |
+| `MAILCTL_MAIL_HOSTNAME` / `MAILCTL_MAIL_DOMAIN` | mail identity |
+| `MAILCTL_MAIL_TLS_CERT` / `MAILCTL_MAIL_TLS_KEY` | TLS paths |
+| `MAILCTL_MAIL_BASE` | maildir root |
+| `MAILCTL_DKIM_DIR` | DKIM key output directory |
+
+### Database: two routes
+
+Pick one with `MAILCTL_DB_MODE` in `.env`. `start.sh` reads it and starts the
+matching set of containers.
+
+#### Route 1 - local (default)
+
+```bash
+MAILCTL_DB_MODE=local
+```
+
+PostgreSQL 18 runs as the `postgres` service with data in the `postgres_data`
+volume. It sits behind the Compose `local` profile and has **no published
+port** - there is no `ports:` mapping, only `expose:`, so only sibling
+containers can reach it at `postgres:5432` on the internal network. No TLS is
+used or claimed.
+
+```bash
+docker compose --profile local ps
+```
+
+Flyway applies `../src/main/resources/db/migration` on every mailctl start, so
+schema changes ship with the image and apply on update.
+
+#### Route 2 - external (TLS enforced)
+
+```bash
+MAILCTL_DB_MODE=external
+MAILCTL_DB_HOST=db.example.com
+MAILCTL_DB_PORT=5432
+MAILCTL_DB_NAME=mailctl
+MAILCTL_DB_USER=mailctl
+MAILCTL_DB_PASSWORD=...
+MAILCTL_DB_SSL_MODE=verify-full
+MAILCTL_DB_SSL_ROOT_CERT=/etc/mailctl/keys/rootCA.crt
+```
+
+The bundled container is not started. The connection is built as:
+
+```
+jdbc:postgresql://HOST:5432/DB?sslmode=verify-full
+    &sslrootcert=/etc/mailctl/keys/rootCA.crt
+    &channelBinding=require
+```
+
+- `sslmode=verify-full` validates the server certificate against the supplied
+  CA **and** checks the hostname matches. `require`/`allow`/`prefer` do not
+  verify server identity.
+- `channelBinding=require` binds the SCRAM exchange to the TLS channel, so a
+  captured authentication cannot be replayed off-channel. This needs
+  PostgreSQL 12+ with `password_encryption = scram-sha-256`.
+
+Optional mTLS - add both to also present a client certificate:
+
+```bash
+MAILCTL_DB_SSL_CERT=/etc/mailctl/keys/client.crt
+MAILCTL_DB_SSL_KEY=/etc/mailctl/keys/client.key
+```
+
+Place the CA (and optionally the client cert/key) in `../keys` on the host; it is
+mounted read-only at `/etc/mailctl/keys`. PgJDBC refuses a group/world-readable
+private key and this mount is `0444`, so the entrypoint stages a `0600` copy at
+`/etc/mailctl/pki/client.key` and points the driver at that.
+
+The server must present a certificate whose SAN matches `MAILCTL_DB_HOST`,
+signed by the CA in `rootCA.crt`.
+
+#### Enforcement is layered, not advisory
+
+TLS cannot be silently downgraded. All three layers refuse a weaker setting:
+
+| Layer | Refuses |
+|-------|---------|
+| `../scripts/start.sh` | non-`verify-full` sslmode, missing host, missing CA, missing host-side key files - before building anything |
+| `../scripts/docker-entrypoint.sh` | the same checks at container start, before the JVM launches |
+| `DbConnection` (Java) | any sslmode other than `verify-full`, and `localhost`/`postgres`/`127.0.0.1`/`::1` as an external host |
+
+So even a bare `java -jar mailctl.jar` cannot end up downgraded, and a failed
+connection reports the cause instead of falling back to plaintext.
+
+Switch modes by editing `MAILCTL_DB_MODE` and re-running `bash scripts/start.sh`.
+
+### Troubleshooting
+
+```bash
+# Container status and health
+docker compose ps
+
+# Logs
+docker compose logs -f mailctl
+docker compose logs -f postfix
+
+# mailctl's own diagnostics
+docker compose exec mailctl mailctl doctor run
+docker compose exec mailctl mailctl health check
+
+# Confirm the schema applied
+docker compose exec postgres psql -U mailctl -d mailctl -c '\dt'
+
+# Re-apply migrations after a schema change
+docker compose restart mailctl
+```
+
+Common problems:
+
+| Symptom | Cause and fix |
+|---------|---------------|
+| `database "mailctl" does not exist` | `POSTGRES_*` in `.env` changed after the volume was created. Either revert it or drop the volume: `docker compose down -v` (destroys all mail state). |
+| `relation "domains" does not exist` | Migrations did not apply. Check `docker compose logs mailctl`, then `docker compose restart mailctl`. |
+| `Service not initialized` | Old image. Run `bash scripts/update.sh`. |
+| Postfix rejects config | Generated files not copied. Run `bash scripts/apply-config.sh` and check `docker compose logs postfix`. |
+| DKIM not signing | Confirm the DKIM maps landed in `config/rspamd/` and that the DNS TXT record matches `dkim show --dns-format`. |
+| Config directories are root-owned | A bind mount was created by Docker as root. Delete `../config` and re-run `bash scripts/start.sh`, which recreates it. |
+| `external mode requires MAILCTL_DB_SSL_MODE=verify-full` | Intentional: weaker modes are refused. Set it to `verify-full` in `.env`, or use `MAILCTL_DB_MODE=local`. |
+| `TLS material not found in keys/` | The container path in `.env` did not map back to `../keys` on the host. The value should be `/etc/mailctl/keys/<file>`. |
+| `database not reachable` in external mode | Check `MAILCTL_DB_HOST`, that the server certificate's SAN matches it, that it is PostgreSQL 12+ with SCRAM, and `docker compose logs mailctl`. |
+
+### Backup
+
+```bash
+# Database
+docker compose exec postgres pg_dump -U mailctl mailctl > mailctl-$(date +%F).sql
+
+# Restore
+docker compose exec -T postgres psql -U mailctl -d mailctl < mailctl-2026-01-15.sql
+```
+
+DKIM private keys live in the database (`dkim_keys.private_key_pem`) and in
+`../dkim`. Back up both. Losing them means re-generating DKIM and updating DNS.
 
 ---
 

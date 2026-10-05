@@ -8,6 +8,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+    /**
+     * PostgreSQL persistence for {@link group.worldstandard.identity.User}.
+     *  *
+     *  * <p>Reads columns by name, so the names must match
+     *  * {@code db/migration/V1__init.sql} exactly.</p>
+     */
 public class JdbcUserRepository implements UserRepository {
     private final HikariDataSource dataSource;
 
@@ -26,15 +32,18 @@ public class JdbcUserRepository implements UserRepository {
             User.Status.valueOf(rs.getString("status")),
             rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("updated_at").toInstant(),
-            rs.getTimestamp("last_login_at") != null ? rs.getTimestamp("last_login_at").toInstant() : null
+            rs.getTimestamp("last_login_at") != null ? rs.getTimestamp("last_login_at").toInstant() : null,
+            rs.getBoolean("storage_enabled"),
+            rs.getString("forward_targets")
         );
     }
 
     @Override
     public User save(User user) {
         String sql = """
-            INSERT INTO users (id, domain_id, email, password_hash, mailbox_path, quota, status, created_at, updated_at, last_login_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO users (id, domain_id, email, password_hash, mailbox_path, quota, status,
+                               created_at, updated_at, last_login_at, storage_enabled, forward_targets)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 domain_id = EXCLUDED.domain_id,
                 email = EXCLUDED.email,
@@ -43,7 +52,9 @@ public class JdbcUserRepository implements UserRepository {
                 quota = EXCLUDED.quota,
                 status = EXCLUDED.status,
                 updated_at = EXCLUDED.updated_at,
-                last_login_at = EXCLUDED.last_login_at
+                last_login_at = EXCLUDED.last_login_at,
+                storage_enabled = EXCLUDED.storage_enabled,
+                forward_targets = EXCLUDED.forward_targets
             """;
         
         try (Connection conn = dataSource.getConnection();
@@ -58,6 +69,8 @@ public class JdbcUserRepository implements UserRepository {
             ps.setObject(8, user.createdAt());
             ps.setObject(9, user.updatedAt());
             ps.setObject(10, user.lastLoginAt());
+            ps.setBoolean(11, user.storageEnabled());
+            ps.setString(12, user.forwardTargets());
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to save user", e);

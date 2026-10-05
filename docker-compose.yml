@@ -1,25 +1,76 @@
+# ===========================================
+# mailctl - Lightweight Mail Server Control Plane
+#
+# Two database modes, selected with MAILCTL_DB_MODE in .env:
+#
+#   local     (default)
+#     Bundled postgres:18 in the `local` profile, NO published port
+#     (reachable only as postgres:5432 on the internal network), no TLS.
+#       docker compose --profile local up -d
+#
+#   external
+#     Remote PostgreSQL over sslmode=verify-full + channelBinding=require.
+#     The bundled container is NOT started:
+#       docker compose up -d
+#
+# One-command deploy:
+#   bash scripts/start.sh      # first-time setup (picks the mode from .env)
+#   bash scripts/update.sh     # git pull + rebuild + restart
+#
+# Drive mailctl with:
+#   docker compose exec mailctl mailctl domain list
+# ===========================================
+name: mailctl
+
 services:
+  # ===========================================
+  # PostgreSQL - LOCAL MODE ONLY
+  #
+  # Lives behind the `local` profile so `docker compose up -d` in external mode
+  # never starts it. Deliberately has no `ports:` mapping: nothing outside the
+  # mailnet network can reach it.
+  # ===========================================
   postgres:
     image: postgres:18-trixie
     container_name: mailctl-postgres
+    restart: unless-stopped
+    profiles:
+      - local
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
-      POSTGRES_DB: ${POSTGRES_DATABASE:-changeme}
-      POSTGRES_USER: ${POSTGRES_USERNAME:-changeme}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-mailctl}
+      POSTGRES_USER: ${POSTGRES_USERNAME:-mailctl}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_secure_password}
     volumes:
       - postgres_data:/var/lib/postgresql
-      - ./init-db:/docker-entrypoint-initdb.d
+    # No `ports:` on purpose - internal network only.
+    expose:
+      - "5432"
     networks:
       - mailnet
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mailctl -d mailctl"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USERNAME:-mailctl} -d ${POSTGRES_DATABASE:-mailctl}"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
 
+  # ===========================================
+  # Redis - Rspamd backend (both modes)
+  # ===========================================
   redis:
     image: redis:trixie
     container_name: mailctl-redis
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - redis_data:/data
     networks:
@@ -28,88 +79,191 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
 
+  # ===========================================
+  # Rspamd - spam filtering and DKIM signing
+  # ===========================================
   rspamd:
     image: rspamd/rspamd:latest
     container_name: mailctl-rspamd
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
       redis:
         condition: service_healthy
     volumes:
-      - ./config/rspamd:/etc/rspamd/local.d
-      - ./dkim:/etc/rspamd/dkim
+      - ./config/rspamd:/etc/rspamd/local.d:ro
+      - ./dkim:/etc/rspamd/dkim:ro
       - rspamd_data:/var/lib/rspamd
     ports:
-      - "11332:11332"
-      - "11333:11333"
-      - "11334:11334"
+      - "11332:11332"   # milter
+      - "11333:11333"   # normal worker
+      - "11334:11334"   # controller
     networks:
       - mailnet
     environment:
       - REDIS_HOST=redis
+    healthcheck:
+      test: ["CMD-SHELL", "rspamadm configtest || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
+  # ===========================================
+  # Postfix - SMTP / MTA / queue
+  # ===========================================
   postfix:
     image: catatnight/postfix:latest
     container_name: mailctl-postfix
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
-      - rspamd
-      - dovecot
+      rspamd:
+        condition: service_started
+      dovecot:
+        condition: service_started
     volumes:
-      - ./config/postfix:/etc/postfix
+      - ./config/postfix:/etc/postfix:ro
       - mail_data:/var/mail
-      - ./dkim:/etc/rspamd/dkim
+      - ./dkim:/etc/rspamd/dkim:ro
     ports:
-      - "25:25"
-      - "587:587"
-      - "465:465"
-    environment:
-      - MAIL_DOMAIN=${MAIL_DOMAIN:-example.com}
-      - SMTP_USER=${SMTP_USER}
-      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - "25:25"     # SMTP
+      - "587:587"   # submission
+      - "465:465"   # implicit TLS
     networks:
       - mailnet
+    environment:
+      - MAIL_DOMAIN=${MAIL_DOMAIN:-example.com}
+      - SMTP_USER=${SMTP_USER:-postfix}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-changeme_smtp_password}
 
+  # ===========================================
+  # Dovecot - IMAP / LMTP / auth
+  #
+  # Auth resolves through Dovecot's own SQL config, which mailctl renders into
+  # config/dovecot. MAILCTL_DB_* below must match whatever mailctl uses, so the
+  # two agree in either database mode.
+  # ===========================================
   dovecot:
     image: dovecot/dovecot:latest
     container_name: mailctl-dovecot
-    depends_on:
-      postgres:
-        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
-      - ./config/dovecot:/etc/dovecot
+      - ./config/dovecot:/etc/dovecot:ro
       - mail_data:/var/mail
     ports:
-      - "143:143"
-      - "993:993"
-      - "4190:4190"
+      - "143:143"    # IMAP
+      - "993:993"    # IMAPS
+      - "4190:4190"  # sieve
     networks:
       - mailnet
+    environment:
+      MAILCTL_DB_MODE: ${MAILCTL_DB_MODE:-local}
+      MAILCTL_DB_HOST: ${MAILCTL_DB_HOST:-postgres}
+      MAILCTL_DB_PORT: ${MAILCTL_DB_PORT:-5432}
+      MAILCTL_DB_NAME: ${POSTGRES_DATABASE:-mailctl}
+      MAILCTL_DB_USER: ${POSTGRES_USERNAME:-mailctl}
+      MAILCTL_DB_PASSWORD: ${POSTGRES_PASSWORD:-changeme_secure_password}
+      MAILCTL_DB_SSL_MODE: ${MAILCTL_DB_SSL_MODE:-disable}
+      MAILCTL_DB_SSL_ROOT_CERT: ${MAILCTL_DB_SSL_ROOT_CERT:-}
+      MAILCTL_DB_SSL_CERT: ${MAILCTL_DB_SSL_CERT:-}
+      MAILCTL_DB_SSL_KEY: ${MAILCTL_DB_SSL_KEY:-}
 
+  # ===========================================
+  # mailctl - the control plane
+  #
+  # Idles with `sleep infinity` so you exec commands into it rather than
+  # running a daemon. mailctl is a CLI, not a server.
+  # ===========================================
   mailctl:
     build:
       context: .
       dockerfile: Dockerfile
+    image: mailctl:latest
     container_name: mailctl
-    depends_on:
-      postgres:
-        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - ./config:/etc/mailctl
       - mail_data:/var/mail
-      - ./dkim:/etc/rspamd/dkim
       - ./backups:/var/backups/mailctl
+      # TLS material for external mode, read-only. The entrypoint stages the
+      # client key at 0600 in /etc/mailctl/pki because PgJDBC refuses a
+      # group/world-readable key and this mount is 0444.
+      - ./keys:/etc/mailctl/keys:ro
     networks:
       - mailnet
-    entrypoint: ["sleep", "infinity"]
+    environment:
+      MAILCTL_CONFIG: /etc/mailctl/config.yaml
 
-volumes:
-  postgres_data:
-  redis_data:
-  rspamd_data:
-  mail_data:
-  backups:
+      # --- Database mode selector ---
+      # local    : the bundled postgres container, no TLS
+      # external : remote host, sslmode=verify-full + channelBinding=require
+      MAILCTL_DB_MODE: ${MAILCTL_DB_MODE:-local}
+
+      # Local mode targets the sibling service by its Compose name.
+      MAILCTL_DB_HOST: ${MAILCTL_DB_HOST:-postgres}
+      MAILCTL_DB_PORT: ${MAILCTL_DB_PORT:-5432}
+      MAILCTL_DB_NAME: ${POSTGRES_DATABASE:-mailctl}
+      MAILCTL_DB_USER: ${POSTGRES_USERNAME:-mailctl}
+      MAILCTL_DB_PASSWORD: ${POSTGRES_PASSWORD:-changeme_secure_password}
+
+      # Local mode must be plain. External mode must be verify-full;
+      # the entrypoint and DbConnection both refuse anything weaker.
+      MAILCTL_DB_SSL_MODE: ${MAILCTL_DB_SSL_MODE:-disable}
+
+      # External mode TLS material. Paths are inside the container; the
+      # entrypoint verifies the host copies exist before starting the JVM.
+      MAILCTL_DB_SSL_ROOT_CERT: ${MAILCTL_DB_SSL_ROOT_CERT:-}
+      MAILCTL_DB_SSL_CERT: ${MAILCTL_DB_SSL_CERT:-}
+      MAILCTL_DB_SSL_KEY: ${MAILCTL_DB_SSL_KEY:-}
+
+      # Mail identity
+      MAILCTL_MAIL_HOSTNAME: ${MAIL_HOSTNAME:-mail.example.com}
+      MAILCTL_MAIL_DOMAIN: ${MAIL_DOMAIN:-example.com}
+      MAILCTL_MAIL_POSTMASTER: ${MAIL_POSTMASTER:-postmaster@example.com}
+      MAILCTL_MAIL_TLS_CERT: ${MAIL_TLS_CERT:-/etc/mailctl/tls/mailcert.pem}
+      MAILCTL_MAIL_TLS_KEY: ${MAIL_TLS_KEY:-/etc/mailctl/tls/mailkey.pem}
+
+      # Paths (bind-mounted so generated config survives a rebuild)
+      MAILCTL_MAIL_BASE: /var/mail
+      MAILCTL_POSTFIX_DIR: /etc/mailctl/generated/postfix
+      MAILCTL_DOVECOT_DIR: /etc/mailctl/generated/dovecot
+      MAILCTL_RSPAMD_DIR: /etc/mailctl/generated/rspamd
+      MAILCTL_DKIM_DIR: /etc/mailctl/generated/dkim
+      MAILCTL_BACKUP_DIR: /var/backups/mailctl
+
+      JAVA_OPTS: "${JAVA_OPTS:--Xms128m -Xmx512m -XX:+UseG1GC}"
 
 networks:
   mailnet:
     driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  rspamd_data:
+    driver: local
+  mail_data:
+    driver: local

@@ -14,6 +14,16 @@ import picocli.CommandLine;
         AliasCommand.ListCmd.class
     }
 )
+    /**
+     * Alias management commands: {@code alias add|remove|list}.
+     *  *
+     *  * <p>An alias maps one address to one or more targets and is rendered into
+     *  * Postfix's {@code virtual_alias_maps}.</p>
+     *  *
+     *  * <p><b>Note:</b> targets are not validated against the local domain set, so an
+     *  * external target is written to the map as-is. Until that is enforced, restrict
+     *  * targets to your own domains to avoid backscatter.</p>
+     */
 public class AliasCommand implements Runnable {
     @Override
     public void run() {

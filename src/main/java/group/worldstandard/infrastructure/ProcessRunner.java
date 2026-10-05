@@ -15,6 +15,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+    /**
+     * Executes allow-listed external commands.
+     *  *
+     *  * <p>Commands are drawn from the {@link Command} enum rather than assembled from
+     *  * user input, so no caller can turn an argument into arbitrary shell syntax. No
+     *  * shell is invoked: {@link ProcessBuilder} is given an argument vector directly.
+     *  * Every run is bounded by a timeout and the process is destroyed if it overruns.
+     *  *
+     *  * <p><b>Host-only under Docker:</b> the enum targets systemd-managed daemons and
+     *  * local binaries that are absent from the mailctl image.</p>
+     */
 public class ProcessRunner {
     private static final Logger log = LoggerFactory.getLogger(ProcessRunner.class);
 

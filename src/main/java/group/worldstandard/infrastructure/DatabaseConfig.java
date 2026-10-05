@@ -12,12 +12,24 @@ import java.nio.file.Path;
 import java.util.Properties;
 import java.util.Set;
 
+    /**
+     * Owns the HikariCP pool and the schema manager.
+     *  *
+     *  * <p>Runs Flyway migrations in the constructor, which means constructing this
+     *  * class requires a reachable database — that is why the CLI reports a database
+     *  * warning instead of failing outright for {@code --help}.</p>
+     *  *
+     *  * <p>The connection URL is produced by {@link DbConnection}, which implements the
+     *  * local/external policy; this class refuses to hand a non-hardened URL to Hikari
+     *  * when external mode is selected.</p>
+     */
 public class DatabaseConfig {
     private static final Logger log = LoggerFactory.getLogger(DatabaseConfig.class);
 
     private final String url;
     private final String username;
     private final String password;
+    private final DbConnection.Mode mode;
     private final HikariDataSource dataSource;
     private final SchemaManager schemaManager;
 
@@ -29,10 +41,24 @@ public class DatabaseConfig {
         group.worldstandard.security.DkimKey.class
     );
 
+    /**
+     * @param url base JDBC URL; TLS parameters for external mode are derived
+     *            from MAILCTL_DB_* environment variables by {@link DbConnection}
+     */
     public DatabaseConfig(String url, String username, String password) {
-        this.url = url;
+        DbConnection.Mode mode = DbConnection.Mode.fromEnv();
+        this.url = DbConnection.fromEnv(mode, url);
         this.username = username;
         this.password = password;
+        this.mode = mode;
+
+        // Fail loudly rather than silently connecting in a downgraded mode.
+        if (mode == DbConnection.Mode.EXTERNAL && !DbConnection.urlIsHardened(this.url)) {
+            throw new IllegalStateException(
+                    "external mode requires sslmode=verify-full and channelBinding=require; got: "
+                    + this.url);
+        }
+        log.info("Database connection: {}", DbConnection.describe(mode));
         
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(url);
@@ -83,6 +109,10 @@ public class DatabaseConfig {
 
     public void close() {
         dataSource.close();
+    }
+
+    public DbConnection.Mode getMode() {
+        return mode;
     }
 
     public String getUrl() {

@@ -8,6 +8,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+    /**
+     * PostgreSQL persistence for {@link Alias} using prepared statements.
+     */
 public class JdbcAliasRepository implements AliasRepository {
     private final HikariDataSource dataSource;
 

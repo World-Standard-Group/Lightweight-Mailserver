@@ -4,6 +4,11 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 import java.util.UUID;
 
+    /**
+     * An address that routes to one or more targets.
+     *  *
+     *  * <p>Rendered into Postfix's {@code virtual_alias_maps}.</p>
+     */
 public record Alias(
     @JsonProperty("id") UUID id,
     @JsonProperty("domainId") UUID domainId,

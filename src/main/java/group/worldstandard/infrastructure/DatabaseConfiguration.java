@@ -5,6 +5,10 @@ import org.flywaydb.core.Flyway;
 
 import javax.sql.DataSource;
 
+    /**
+     * Alias kept for the older configuration naming; see
+     *  * {@link DatabaseConfig} for the active implementation.
+     */
 public class DatabaseConfiguration {
 
     private String dbUrl;

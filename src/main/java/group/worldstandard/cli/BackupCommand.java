@@ -20,6 +20,21 @@ import java.time.format.DateTimeFormatter;
         BackupCommand.List.class
     }
 )
+    /**
+     * Backup and restore commands: {@code backup create|restore|list}.
+     *  *
+     *  * <p><b>Only {@code backup list} is implemented.</b> {@code create} and
+     *  * {@code restore} print a placeholder message and write nothing, so they cannot
+     *  * be used to protect data. Until they are implemented, back up the database
+     *  * directly:</p>
+     *  *
+     *  * <pre>{@code
+     *  * docker compose exec postgres pg_dump -U mailctl mailctl > mailctl-$(date +%F).sql
+     *  * }</pre>
+     *  *
+     *  * <p>DKIM private keys also need backing up; they live in
+     *  * {@code dkim_keys.private_key_pem} and in the {@code dkim/} directory.</p>
+     */
 public class BackupCommand implements Runnable {
     @Override
     public void run() {

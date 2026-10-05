@@ -1,0 +1,45 @@
+# Git
+.git
+.gitignore
+.github
+
+# IDE
+.idea
+*.iml
+*.iws
+.vscode
+
+# Build artifacts
+target/
+dependency-reduced-pom.xml
+
+# Documentation (not needed in the image)
+*.md
+
+# Environment and secrets
+.env
+.env.*
+keys/
+dkim/
+config/
+backups/
+
+# Logs
+logs/
+*.log
+
+# Host-side scripts (only docker-entrypoint.sh is copied)
+scripts/start.sh
+scripts/update.sh
+scripts/mailctl
+scripts/mailctl-config-deploy.sh
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Note: scripts/docker-entrypoint.sh IS required by the Dockerfile.
+# Prevent recursive copy
+Dockerfile*
+docker-compose*
+.dockerignore

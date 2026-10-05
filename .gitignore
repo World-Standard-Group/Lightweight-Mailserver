@@ -36,4 +36,16 @@ build/
 
 /.idea/
 /.mvn/
-/keys/
+/keys/*
+!/keys/README.md
+
+### mailctl runtime state ###
+# Local deployment config (contains TLS keys and generated mail config).
+# Ignore contents rather than the directory, so the .gitkeep skeleton survives.
+/config/*
+!/config/.gitkeep
+/dkim/
+/backups/
+
+# Local env
+.env

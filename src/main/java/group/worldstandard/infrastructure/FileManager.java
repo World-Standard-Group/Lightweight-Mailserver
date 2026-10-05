@@ -10,6 +10,17 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Comparator;
 import java.util.Set;
 
+    /**
+     * Filesystem operations with POSIX permissions and atomic replacement.
+     *  *
+     *  * <p>{@link #atomicReplace(Path, Path)} copies to a sibling {@code .new} file and
+     *  * then {@code ATOMIC_MOVE}s it into place, so Postfix or Dovecot reading the
+     *  * directory never sees a truncated file.</p>
+     *  *
+     *  * <p>Permission calls are best-effort: on a filesystem without POSIX support they
+     *  * log a warning rather than failing, which keeps the code usable on Windows and
+     *  * on bind mounts that ignore modes.</p>
+     */
 public class FileManager {
     private static final Logger log = LoggerFactory.getLogger(FileManager.class);
 

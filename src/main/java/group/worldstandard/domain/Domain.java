@@ -4,6 +4,12 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Instant;
 import java.util.UUID;
 
+    /**
+     * A mail domain accepted by this server.
+     *  *
+     *  * <p>Carries its own DKIM settings (selector, key size, algorithm) so a domain's
+     *  * signing policy travels with it. The name is always stored lowercased.</p>
+     */
 public record Domain(
     @JsonProperty("id") UUID id,
     @JsonProperty("name") String name,

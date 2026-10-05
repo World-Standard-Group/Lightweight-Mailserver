@@ -18,6 +18,22 @@ import java.nio.file.Paths;
         ConfigCommand.Deploy.class
     }
 )
+    /**
+     * Configuration commands: {@code config generate|validate|show|deploy}.
+     *  *
+     *  * <p>{@code generate} is implemented and is the command you actually need. The
+     *  * other three are not:</p>
+     *  * <ul>
+     *  *   <li>{@code validate} only checks whether a directory exists.</li>
+     *  *   <li>{@code show} prints a header.</li>
+     *  *   <li>{@code deploy} requires {@code postfix}, {@code dovecot} and
+     *  *       {@code rspamadm} binaries, which are not present in the mailctl image.</li>
+     *  * </ul>
+     *  *
+     *  * <p>Under Docker use {@code bash scripts/apply-config.sh} instead, which copies
+     *  * generated files into the service mount points, runs {@code postmap} inside the
+     *  * Postfix container, and restarts the mail services.</p>
+     */
 public class ConfigCommand implements Runnable {
     @Override
     public void run() {

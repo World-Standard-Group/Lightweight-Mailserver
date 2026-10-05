@@ -1,13 +1,24 @@
 package group.worldstandard.infrastructure;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
-import tools.jackson.databind.ObjectMapper;
+import tools.jackson.dataformat.yaml.YAMLMapper;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
+    /**
+     * Configuration model, loaded from {@code config.yaml} and then overlaid with
+     *  * {@code MAILCTL_*} environment variables.
+     *  *
+     *  * <p>The YAML reader is a {@code YAMLMapper}: a plain databind {@code ObjectMapper}
+     *  * cannot parse YAML and throws on the first key. Environment variables win over
+     *  * the file so a container can be retargeted without editing anything, which is
+     *  * how Compose selects the local or external database.</p>
+     *  *
+     *  * @see DbConnection
+     */
 public record AppConfig(
     @JsonProperty("database") DatabaseConfig database,
     @JsonProperty("mail") MailConfig mail,
@@ -84,16 +95,34 @@ public record AppConfig(
         }
     }
 
-    private static final ObjectMapper YAML_MAPPER = new ObjectMapper();
+    /**
+     * Reads and writes config.yaml. A plain databind ObjectMapper cannot parse
+     * YAML — it throws "Unrecognized token 'database'" on the very first key.
+     */
+    private static final YAMLMapper YAML_MAPPER = YAMLMapper.builder()
+            .build();
     private static final Path DEFAULT_CONFIG_PATH = Paths.get("/etc/mailctl/config.yaml");
 
+    /**
+     * Config file path. MAILCTL_CONFIG wins so the Docker image can be pointed
+     * at a mounted config without rewriting the command line.
+     */
+    public static Path defaultConfigPath() {
+        String fromEnv = System.getenv("MAILCTL_CONFIG");
+        if (fromEnv != null && !fromEnv.isBlank()) {
+            return Paths.get(fromEnv);
+        }
+        return DEFAULT_CONFIG_PATH;
+    }
+
     public static AppConfig load() throws IOException {
-        return load(DEFAULT_CONFIG_PATH);
+        return load(defaultConfigPath());
     }
 
     public static AppConfig load(Path path) throws IOException {
         if (Files.exists(path)) {
-            return YAML_MAPPER.readValue(path.toFile(), AppConfig.class);
+            AppConfig cfg = YAML_MAPPER.readValue(path.toFile(), AppConfig.class);
+            return cfg.withEnvOverrides();
         }
         return new AppConfig(
             new DatabaseConfig(),
@@ -101,15 +130,61 @@ public record AppConfig(
             new SecurityConfig(),
             new PathsConfig(),
             new ServicesConfig()
+        ).withEnvOverrides();
+    }
+
+    /**
+     * Docker passes configuration as environment variables; they win over the
+     * file so a container can be retargeted without editing config.yaml.
+     * Each variable is optional — unset means "keep the file value".
+     */
+    private AppConfig withEnvOverrides() {
+        return new AppConfig(
+            new DatabaseConfig(
+                // MAILCTL_DB_HOST/PORT/NAME drive local vs external selection
+                // in DbConnection; MAILCTL_DB_URL remains the fallback.
+                env("MAILCTL_DB_URL", database.url()),
+                env("MAILCTL_DB_USER", database.user()),
+                env("MAILCTL_DB_PASSWORD", database.password())
+            ),
+            new MailConfig(
+                env("MAILCTL_MAIL_HOSTNAME", mail.hostname()),
+                env("MAILCTL_MAIL_DOMAIN", mail.domain()),
+                env("MAILCTL_MAIL_POSTMASTER", mail.postmaster()),
+                env("MAILCTL_MAIL_TLS_CERT", mail.tlsCert()),
+                env("MAILCTL_MAIL_TLS_KEY", mail.tlsKey())
+            ),
+            new SecurityConfig(
+                env("MAILCTL_DKIM_DIR", security.dkimKeyDirectory()),
+                env("MAILCTL_DKIM_SELECTOR", security.dkimDefaultSelector()),
+                Integer.parseInt(env("MAILCTL_DKIM_KEY_SIZE", String.valueOf(security.dkimDefaultKeySize()))),
+                env("MAILCTL_DKIM_ALGORITHM", security.dkimDefaultAlgorithm())
+            ),
+            new PathsConfig(
+                env("MAILCTL_MAIL_BASE", paths.mailBase()),
+                env("MAILCTL_POSTFIX_DIR", paths.postfixConfigDir()),
+                env("MAILCTL_DOVECOT_DIR", paths.dovecotConfigDir()),
+                env("MAILCTL_RSPAMD_DIR", paths.rspamdConfigDir()),
+                env("MAILCTL_BACKUP_DIR", paths.backupDir())
+            ),
+            services
         );
     }
 
+    private static String env(String key, String fallback) {
+        String value = System.getenv(key);
+        return (value == null || value.isBlank()) ? fallback : value;
+    }
+
     public void save(Path path) throws IOException {
-        Files.createDirectories(path.getParent());
+        Path parent = path.getParent();
+        if (parent != null) {
+            Files.createDirectories(parent);
+        }
         YAML_MAPPER.writerWithDefaultPrettyPrinter().writeValue(path.toFile(), this);
     }
 
     public void save() throws IOException {
-        save(DEFAULT_CONFIG_PATH);
+        save(defaultConfigPath());
     }
 }

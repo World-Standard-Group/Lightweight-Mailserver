@@ -14,9 +14,24 @@ import picocli.CommandLine;
         UserCommand.Disable.class,
         UserCommand.Enable.class,
         UserCommand.Passwd.class,
-        UserCommand.ListCmd.class
+        UserCommand.ListCmd.class,
+        UserCommand.AddForwarding.class,
+        UserCommand.SetForward.class,
+        UserCommand.ToMailbox.class,
+        UserCommand.ToForwarding.class,
+        UserCommand.ForwardingList.class
     }
 )
+    /**
+     * User (mailbox) management: {@code user add|remove|disable|enable|passwd|list}.
+     *  *
+     *  * <p>Disabled users are refused at authentication time rather than deleted,
+     *  * because the generated Dovecot {@code password_query} and {@code user_query}
+     *  * both filter on {@code status = 'ACTIVE'}.</p>
+     *  *
+     *  * <p><b>Note:</b> password storage is not production-ready; see
+     *  * {@link group.worldstandard.security.PasswordHasher}.</p>
+     */
 public class UserCommand implements Runnable {
     @Override
     public void run() {
@@ -283,6 +298,226 @@ public class UserCommand implements Runnable {
                                 u.email(), u.id(), u.status(), u.quota());
                         }
                     }
+                }
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+            }
+        }
+    }
+
+    @CommandLine.Command(name = "add-forwarding",
+        description = "Add a forwarding-only user (no mailbox, mail is forwarded)")
+    public static class AddForwarding implements Runnable {
+        @CommandLine.Parameters(index = "0", description = "Email address (e.g., zazalng@example.com)")
+        String email;
+
+        @CommandLine.Option(names = {"--password"}, description = "Password used to send mail (prompt if omitted)")
+        String password;
+
+        @CommandLine.Option(names = {"--forward-to"}, required = true, split = ",",
+            description = "External address(es), comma-separated (e.g., a@gmail.com,b@outlook.com)")
+        java.util.List<String> forwardTo;
+
+        private final UserService userService;
+
+        public AddForwarding(UserService userService) {
+            this.userService = userService;
+        }
+
+        public AddForwarding() {
+            this.userService = null;
+        }
+
+        @Override
+        public void run() {
+            if (userService == null) {
+                System.err.println("Service not initialized. Use main entry point.");
+                return;
+            }
+            if (password == null) {
+                System.out.print("Enter password: ");
+                password = System.console() != null
+                        ? new String(System.console().readPassword())
+                        : new java.util.Scanner(System.in).nextLine();
+            }
+            try {
+                User created = userService.addForwardingUser(email, password, String.join(",", forwardTo));
+                System.out.println("Forwarding-only user created:");
+                System.out.println("  Email:  " + created.email());
+                System.out.println("  Forwards to: " + created.forwardTargets());
+                System.out.println("  Storage: none (no mailbox is created)");
+                System.out.println("  The user can send via SMTP submission on port 587.");
+                System.out.println();
+                System.out.println("Run 'mailctl config generate' then 'bash scripts/apply-config.sh' to apply.");
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+            }
+        }
+    }
+
+    @CommandLine.Command(name = "set-forward", description = "Replace a forwarding-only user's targets")
+    public static class SetForward implements Runnable {
+        @CommandLine.Parameters(index = "0", description = "Email address")
+        String email;
+
+        @CommandLine.Option(names = {"--forward-to"}, required = true, split = ",",
+            description = "External address(es), comma-separated")
+        java.util.List<String> forwardTo;
+
+        private final UserService userService;
+
+        public SetForward(UserService userService) {
+            this.userService = userService;
+        }
+
+        public SetForward() {
+            this.userService = null;
+        }
+
+        @Override
+        public void run() {
+            if (userService == null) {
+                System.err.println("Service not initialized. Use main entry point.");
+                return;
+            }
+            try {
+                User updated = userService.setForwardTargets(email, String.join(",", forwardTo));
+                System.out.println("Forwarding targets updated for " + updated.email());
+                System.out.println("  Now forwards to: " + updated.forwardTargets());
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+            }
+        }
+    }
+
+    @CommandLine.Command(name = "to-mailbox",
+        description = "Convert a forwarding-only user into a normal mailbox user")
+    public static class ToMailbox implements Runnable {
+        @CommandLine.Parameters(index = "0", description = "Email address")
+        String email;
+
+        @CommandLine.Option(names = {"--quota"}, description = "Mailbox quota", defaultValue = "1G")
+        String quota;
+
+        private final UserService userService;
+
+        public ToMailbox(UserService userService) {
+            this.userService = userService;
+        }
+
+        public ToMailbox() {
+            this.userService = null;
+        }
+
+        @Override
+        public void run() {
+            if (userService == null) {
+                System.err.println("Service not initialized. Use main entry point.");
+                return;
+            }
+            try {
+                User updated = userService.convertToMailbox(email);
+                System.out.println("Converted to a mailbox user: " + updated.email());
+                System.out.println("  Mailbox: " + updated.mailboxPath());
+                System.out.println("  Forwarding targets cleared.");
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+            }
+        }
+    }
+
+    @CommandLine.Command(name = "to-forwarding",
+        description = "Convert a mailbox user into forwarding-only (DELETES stored mail)")
+    public static class ToForwarding implements Runnable {
+        @CommandLine.Parameters(index = "0", description = "Email address")
+        String email;
+
+        @CommandLine.Option(names = {"--forward-to"}, required = true, split = ",",
+            description = "External address(es), comma-separated")
+        java.util.List<String> forwardTo;
+
+        @CommandLine.Option(names = {"--force"}, description = "Skip the destructive-action confirmation")
+        boolean force;
+
+        private final UserService userService;
+
+        public ToForwarding(UserService userService) {
+            this.userService = userService;
+        }
+
+        public ToForwarding() {
+            this.userService = null;
+        }
+
+        @Override
+        public void run() {
+            if (userService == null) {
+                System.err.println("Service not initialized. Use main entry point.");
+                return;
+            }
+            if (!force) {
+                System.out.println("WARNING: this deletes the user's maildir and all stored mail.");
+                System.out.print("Continue for '" + email + "'? (y/N): ");
+                String confirm = System.console() != null
+                        ? System.console().readLine()
+                        : new java.util.Scanner(System.in).nextLine();
+                if (!"y".equalsIgnoreCase(confirm)) {
+                    System.out.println("Cancelled.");
+                    return;
+                }
+            }
+            try {
+                User updated = userService.convertToForwarding(email, String.join(",", forwardTo));
+                System.out.println("Converted to forwarding-only: " + updated.email());
+                System.out.println("  Now forwards to: " + updated.forwardTargets());
+                System.out.println("  Stored mail was removed.");
+            } catch (Exception e) {
+                System.err.println("Error: " + e.getMessage());
+            }
+        }
+    }
+
+    @CommandLine.Command(name = "forwarding-list", description = "List forwarding-only users and their targets")
+    public static class ForwardingList implements Runnable {
+        @CommandLine.Parameters(index = "0", arity = "0..1", description = "Domain (optional)")
+        String domain;
+
+        private final UserService userService;
+
+        public ForwardingList(UserService userService) {
+            this.userService = userService;
+        }
+
+        public ForwardingList() {
+            this.userService = null;
+        }
+
+        @Override
+        public void run() {
+            if (userService == null) {
+                System.err.println("Service not initialized. Use main entry point.");
+                return;
+            }
+            try {
+                java.util.UUID domainId = null;
+                if (domain != null) {
+                    var repo = userService.getUserRepository();
+                    for (User u : repo.findAll()) {
+                        if (u.email().endsWith("@" + domain)) {
+                            domainId = u.domainId();
+                            break;
+                        }
+                    }
+                }
+                var users = userService.listForwardingUsers(domainId);
+                if (users.isEmpty()) {
+                    System.out.println("No forwarding-only users found.");
+                    return;
+                }
+                System.out.println("Forwarding-only users:");
+                for (User u : users) {
+                    System.out.printf("  %s -> %s%n", u.email(),
+                            String.join(", ", UserService.targetsOf(u)));
                 }
             } catch (Exception e) {
                 System.err.println("Error: " + e.getMessage());

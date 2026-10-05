@@ -12,6 +12,14 @@ import picocli.CommandLine;
         HealthCommand.Readiness.class
     }
 )
+    /**
+     * Health checks: {@code health check|liveness|readiness}.
+     *  *
+     *  * <p>{@code liveness} and {@code readiness} are suitable as container probes and
+     *  * are what the Docker entrypoint uses to gate startup. {@code check} runs the
+     *  * full report and inherits the placeholder caveats of
+     *  * {@link group.worldstandard.infrastructure.HealthChecker}.</p>
+     */
 public class HealthCommand implements Runnable {
     @Override
     public void run() {

@@ -14,6 +14,18 @@ import picocli.CommandLine;
         ServiceCommand.Disable.class
     }
 )
+    /**
+     * Service control: {@code service status|reload|restart|enable|disable}.
+     *  *
+     *  * <p><b>These commands do not work under Docker.</b> They shell out to
+     *  * {@code postfix}, {@code dovecot}, {@code doveadm}, {@code rspamadm} and
+     *  * {@code systemctl}, none of which exist in the mailctl image, and reloading a
+     *  * sibling container requires {@code docker exec} rather than a local process
+     *  * call.</p>
+     *  *
+     *  * <p>Under the Compose deployment use {@code bash scripts/apply-config.sh}.
+     *  * These commands remain useful on a systemd host.</p>
+     */
 public class ServiceCommand implements Runnable {
     @Override
     public void run() {

@@ -73,7 +73,10 @@ public class ServiceRegistry {
         // Initialize services
         passwordHasher = new PasswordHasher();
         domainService = new DomainService(domainRepository);
-        userService = new UserService(userRepository, domainRepository, passwordHasher);
+        // Pass the configured maildir root so mailbox paths agree with the
+        // generated Dovecot mail_location.
+        userService = new UserService(userRepository, domainRepository, passwordHasher,
+                appConfig.paths().mailBase());
         routingService = new RoutingService(aliasRepository, domainRepository);
         dkimKeyManager = new DkimKeyManager(dkimKeyRepository, domainRepository);
         

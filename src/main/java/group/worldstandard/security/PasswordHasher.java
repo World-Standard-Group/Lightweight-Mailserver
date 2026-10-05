@@ -6,6 +6,32 @@ import org.slf4j.LoggerFactory;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 
+/**
+ * Hashes and verifies mailbox passwords.
+ *
+ * <p><b>This is not production-ready and must not be used with real
+ * passwords.</b> The class declares Argon2id constants and the inner helper is
+ * named {@code BCrypt}, but neither is true: the actual operation is
+ * {@code SHA-256(salt + password)} with the result stored behind a
+ * BCrypt-<i>looking</i> {@code $2a$12$} prefix.</p>
+ *
+ * <p>Three concrete problems:</p>
+ * <ol>
+ *   <li>SHA-256 is far too fast to resist offline brute force. Argon2id or
+ *       bcrypt with a real work factor is required.</li>
+ *   <li>The {@code $2a$} prefix misrepresents the hash to every tool that
+ *       parses it, including Dovecot, which is generated with
+ *       {@code default_pass_scheme = BLF-CRYPT} and will fail to verify these
+ *       values.</li>
+ *   <li>{@link #verify(String, String)} compares hashes with
+ *       {@link String#equals(String)}, which short-circuits on the first
+ *       differing byte and is not constant-time.</li>
+ * </ol>
+ *
+ * <p>Replace with a vetted implementation (for example Spring Security's
+ * {@code BCryptPasswordEncoder}, or {@code argon2-jvm}) before creating any real
+ * user. Existing hashes will need migrating, since the format changes.</p>
+ */
 public class PasswordHasher {
     private static final Logger log = LoggerFactory.getLogger(PasswordHasher.class);
     

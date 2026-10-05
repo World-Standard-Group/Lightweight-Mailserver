@@ -4,6 +4,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+    /**
+     * Persistence contract for {@link group.worldstandard.identity.User} records.
+     *  *
+     *  * <p>Implementations must treat lookups as case-insensitive.</p>
+     */
 public interface UserRepository {
     User save(User user);
     Optional<User> findById(UUID id);
