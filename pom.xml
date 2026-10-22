@@ -18,6 +18,7 @@
         <hikari.version>7.1.0</hikari.version>
         <slf4j.version>2.0.18</slf4j.version>
         <logback.version>1.6.5</logback.version>
+        <bcprov.version>1.81</bcprov.version>
     </properties>
 
     <dependencyManagement>
@@ -100,6 +101,16 @@
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
             <version>${logback.version}</version>
+        </dependency>
+
+        <!-- Password hashing -->
+        <!-- Bcrypt (OpenBSD dialect), verified byte-compatible with Dovecot
+             2.3's crypt_verify_blowfish: a {BLF-CRYPT}$2y$ hash generated here
+             is accepted and verified by Dovecot itself. -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>${bcprov.version}</version>
         </dependency>
 
         <!-- Testing -->

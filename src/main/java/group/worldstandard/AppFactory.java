@@ -78,8 +78,10 @@ public class AppFactory implements IFactory {
         // Initialize services
         passwordHasher = new PasswordHasher();
         domainService = new DomainService(domainRepository);
-        userService = new UserService(userRepository, domainRepository, passwordHasher);
-        routingService = new RoutingService(aliasRepository, domainRepository);
+        userService = new UserService(userRepository, domainRepository, passwordHasher,
+                appConfig.paths().mailBase());
+        routingService = new RoutingService(aliasRepository, domainRepository, passwordHasher,
+                appConfig.paths().mailBase());
         dkimKeyManager = new DkimKeyManager(dkimKeyRepository, domainRepository);
         
         // Initialize infrastructure
@@ -159,6 +161,15 @@ public class AppFactory implements IFactory {
             }
             if (type == AliasCommand.ListCmd.class) {
                 return (K) new AliasCommand.ListCmd(routingService);
+            }
+            if (type == AliasCommand.Passwd.class) {
+                return (K) new AliasCommand.Passwd(routingService);
+            }
+            if (type == AliasCommand.Enable.class) {
+                return (K) new AliasCommand.Enable(routingService);
+            }
+            if (type == AliasCommand.Disable.class) {
+                return (K) new AliasCommand.Disable(routingService);
             }
             
             // DKIM commands

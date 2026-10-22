@@ -24,6 +24,10 @@ public class JdbcAliasRepository implements AliasRepository {
             UUID.fromString(rs.getString("domain_id")),
             rs.getString("alias"),
             rs.getString("targets"),
+            rs.getString("password_hash"),
+            rs.getString("mailbox_path"),
+            rs.getString("quota"),
+            Alias.Status.valueOf(rs.getString("status")),
             rs.getTimestamp("created_at").toInstant(),
             rs.getTimestamp("updated_at").toInstant()
         );
@@ -32,12 +36,17 @@ public class JdbcAliasRepository implements AliasRepository {
     @Override
     public Alias save(Alias alias) {
         String sql = """
-            INSERT INTO aliases (id, domain_id, alias, targets, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO aliases (id, domain_id, alias, targets, password_hash,
+                                mailbox_path, quota, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 domain_id = EXCLUDED.domain_id,
                 alias = EXCLUDED.alias,
                 targets = EXCLUDED.targets,
+                password_hash = EXCLUDED.password_hash,
+                mailbox_path = EXCLUDED.mailbox_path,
+                quota = EXCLUDED.quota,
+                status = EXCLUDED.status,
                 updated_at = EXCLUDED.updated_at
             """;
         
@@ -47,8 +56,12 @@ public class JdbcAliasRepository implements AliasRepository {
             ps.setObject(2, alias.domainId());
             ps.setString(3, alias.alias());
             ps.setString(4, alias.targets());
-            ps.setObject(5, alias.createdAt());
-            ps.setObject(6, alias.updatedAt());
+            ps.setString(5, alias.passwordHash());
+            ps.setString(6, alias.mailboxPath());
+            ps.setString(7, alias.quota());
+            ps.setString(8, alias.status().name());
+            ps.setObject(9, alias.createdAt());
+            ps.setObject(10, alias.updatedAt());
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to save alias", e);

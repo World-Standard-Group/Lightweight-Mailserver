@@ -161,6 +161,168 @@ public final class DbConnection {
                 isBlank(sslMode) ? (mode == Mode.EXTERNAL ? "verify-full" : "disable") : sslMode);
     }
 
+    /**
+     * The database coordinates a NON-Java client needs.
+     *
+     * <p>Dovecot's PostgreSQL driver is not JDBC: it speaks libpq, so it needs
+     * the host, port, database and role as separate values plus a connection
+     * string it can hand to {@code PQconnectStart}. This record is that
+     * description.</p>
+     *
+     * @param host       database host, as reachable from the client container
+     * @param port       database port
+     * @param database   database name
+     * @param user       database role
+     * @param password   role password
+     * @param mode       local or external
+     * @param sslMode    requested sslmode; external mode uses verify-full
+     * @param sslRootCert CA that signed the server certificate, if any
+     */
+    public record DbEndpoint(
+        String host,
+        int port,
+        String database,
+        String user,
+        String password,
+        Mode mode,
+        String sslMode,
+        String sslRootCert
+    ) {}
+
+    /**
+     * Resolves the database coordinates for a non-Java client.
+     *
+     * <p>The environment wins over the configured JDBC URL, exactly as
+     * {@link #fromEnv(Mode, String)} does for JDBC, because that is what makes
+     * the local and the external mode work: in local mode the host is the
+     * Compose service name, in external mode it is the remote host.</p>
+     *
+     * <p>The result is a plain host/port/database triple, never the JDBC URL:
+     * a JDBC URL is meaningless to libpq, and a client that is a sibling
+     * container must not be pointed at {@code localhost}.</p>
+     *
+     * @param mode            local or external
+     * @param fallbackUrl     configured JDBC URL, used when the environment
+     *                         does not name a host
+     * @param fallbackUser    configured role
+     * @param fallbackPassword configured password
+     */
+    public static DbEndpoint endpointFromEnv(Mode mode, String fallbackUrl,
+                                              String fallbackUser, String fallbackPassword) {
+        String host = getenv("MAILCTL_DB_HOST");
+        String port = getenv("MAILCTL_DB_PORT");
+        String name = getenv("MAILCTL_DB_NAME");
+        String user = getenv("MAILCTL_DB_USER");
+        String password = getenv("MAILCTL_DB_PASSWORD");
+        String sslMode = getenv("MAILCTL_DB_SSL_MODE");
+        String rootCert = getenv("MAILCTL_DB_SSL_ROOT_CERT");
+
+        if (isBlank(host)) {
+            // Nothing configured: fall back to whatever the JDBC URL says.
+            String[] parsed = parseJdbcUrl(fallbackUrl);
+            host = parsed[0];
+            port = parsed[1];
+            name = parsed[2];
+        }
+        if (isBlank(user)) {
+            user = fallbackUser;
+        }
+        if (isBlank(password)) {
+            password = fallbackPassword;
+        }
+        if (isBlank(sslMode)) {
+            sslMode = (mode == Mode.EXTERNAL) ? "verify-full" : "disable";
+        }
+
+        return new DbEndpoint(
+                host,
+                isBlank(port) ? 5432 : Integer.parseInt(port.trim()),
+                isBlank(name) ? "mailctl" : name,
+                isBlank(user) ? "mailctl" : user,
+                password == null ? "" : password,
+                mode,
+                sslMode.trim(),
+                rootCert);
+    }
+
+    /**
+     * Renders a libpq connection string.
+     *
+     * <p>libpq keyword syntax, not a JDBC URL: {@code host=... port=...
+     * dbname=... user=... password=...}. Values are single-quoted so a
+     * password with a space or a quote cannot break the string apart.</p>
+     *
+     * <p>In external mode the string carries {@code sslmode=verify-full} and
+     * the CA that signed the server certificate, so the client verifies the
+     * server identity. The JDBC-only {@code channelBinding=require} has no
+     * libpq spelling in every libpq version, so it is not emitted here; the
+     * connection is still TLS-verified and the role still authenticates with
+     * its password (or SCRAM).</p>
+     */
+    public static String libpqConnectString(DbEndpoint endpoint) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("host=").append(quoteLibpq(endpoint.host()))
+          .append(" port=").append(endpoint.port())
+          .append(" dbname=").append(quoteLibpq(endpoint.database()))
+          .append(" user=").append(quoteLibpq(endpoint.user()));
+        if (endpoint.password() != null && !endpoint.password().isEmpty()) {
+            sb.append(" password=").append(quoteLibpq(endpoint.password()));
+        }
+        if (endpoint.mode() == Mode.EXTERNAL) {
+            sb.append(" sslmode=verify-full");
+            if (!isBlank(endpoint.sslRootCert())) {
+                sb.append(" sslrootcert=").append(quoteLibpq(endpoint.sslRootCert()));
+            }
+        }
+        return sb.toString();
+    }
+
+    /** Splits a JDBC URL into host, port and database name. */
+    private static String[] parseJdbcUrl(String url) {
+        String host = "localhost";
+        String port = "5432";
+        String database = "mailctl";
+        if (url == null || url.isBlank()) {
+            return new String[]{host, port, database};
+        }
+        try {
+            String rest = url.substring(url.indexOf("//") + 2);
+            String query = rest.contains("?") ? rest.substring(rest.indexOf("?")) : "";
+            rest = rest.contains("?") ? rest.substring(0, rest.indexOf("?")) : rest;
+            String db = "";
+            int slash = rest.indexOf('/');
+            if (slash >= 0) {
+                db = rest.substring(slash + 1);
+                rest = rest.substring(0, slash);
+            }
+            int colon = rest.lastIndexOf(':');
+            if (colon > 0) {
+                port = rest.substring(colon + 1);
+                rest = rest.substring(0, colon);
+            }
+            if (!rest.isBlank()) {
+                host = rest;
+            }
+            if (!db.isBlank()) {
+                database = db;
+            }
+        } catch (RuntimeException e) {
+            log.warn("Could not parse JDBC URL, using defaults: {}", url);
+        }
+        return new String[]{host, port, database};
+    }
+
+    /** Single-quotes a libpq connection-string value. */
+    private static String quoteLibpq(String value) {
+        String v = value == null ? "" : value;
+        return "'" + v.replace("\\", "\\\\").replace("'", "\\'") + "'";
+    }
+
+    private static String getenv(String key) {
+        String value = System.getenv(key);
+        return (value == null || value.isBlank()) ? null : value.trim();
+    }
+
     /** Reports the mode as a short string for logs and the doctor command. */
     public static String describe(Mode mode) {
         return mode == Mode.LOCAL

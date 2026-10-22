@@ -10,10 +10,10 @@ import java.util.UUID;
 
     /**
      * A DKIM key pair plus the DNS record that publishes its public half.
-     *  *
-     *  * <p>The private key is stored in the database so the control plane can render
-     *  * Rspamd's signing maps without external key storage. Treat this table as a
-     *  * secret: a leak lets anyone sign mail as the domain.</p>
+     *
+     * <p>The private key is stored in the database so the control plane can render
+     * Rspamd's signing maps without external key storage. Treat this table as a
+     * secret: a leak lets anyone sign mail as the domain.</p>
      */
 public record DkimKey(
     @JsonProperty("id") UUID id,

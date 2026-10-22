@@ -77,7 +77,12 @@ public class ServiceRegistry {
         // generated Dovecot mail_location.
         userService = new UserService(userRepository, domainRepository, passwordHasher,
                 appConfig.paths().mailBase());
-        routingService = new RoutingService(aliasRepository, domainRepository);
+        // The alias service needs the same hasher and the same maildir root as
+        // the user service: an alias is a mail principal, and its mailbox path
+        // has to resolve to the same directory the generated Dovecot
+        // mail_location points at.
+        routingService = new RoutingService(aliasRepository, domainRepository, passwordHasher,
+                appConfig.paths().mailBase());
         dkimKeyManager = new DkimKeyManager(dkimKeyRepository, domainRepository);
         
         // Initialize infrastructure
